@@ -3,3 +3,5 @@ node_modules/
 inventory.db
 .DS_Store
 npm-debug.log
+soap.db
+

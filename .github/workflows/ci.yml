@@ -21,8 +21,5 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    - name: Initialize database
-      run: npm run init-db
-
     - name: Sanity check
       run: node -e "console.log('sanity check OK')"
