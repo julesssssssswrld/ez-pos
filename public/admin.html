@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Liquid Soap Admin Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-900">
+  <div class="bg-white border-b border-slate-200 shadow-sm">
+    <div class="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <p class="text-xs uppercase tracking-[0.3em] text-slate-400">Admin Dashboard</p>
+        <h1 class="text-2xl font-semibold text-slate-900">Liquid Soap Inventory Control</h1>
+      </div>
+      <div class="relative flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div id="admin-role-badge" class="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700">Manager</div>
+        <button id="admin-settings-btn" class="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 hover:bg-slate-200">Settings</button>
+        <div id="admin-settings-dropdown" class="invisible absolute left-1/2 top-full z-50 mt-2 w-52 -translate-x-1/2 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl transition-opacity duration-200">
+          <button id="dropdown-export-btn" class="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-50">Export to Excel</button>
+          <button id="dropdown-change-password-btn" class="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-50">Change Password</button>
+          <button id="dropdown-reset-system-btn" class="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-50">Reset System</button>
+          <button id="dropdown-logout-btn" class="w-full px-4 py-3 text-left text-sm text-slate-900 hover:bg-slate-50">Logout</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main class="mx-auto max-w-7xl px-4 py-6">
+    <section class="grid gap-4 xl:grid-cols-[2.2fr_1fr]">
+      <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-2">
+        <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Daily Revenue</p>
+          <p id="card-revenue" class="mt-4 text-3xl font-semibold text-slate-900">₱0.00</p>
+          <p class="mt-2 text-sm text-slate-500">Today’s confirmed sales.</p>
+        </article>
+        <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Profit</p>
+          <p id="card-profit" class="mt-4 text-3xl font-semibold text-slate-900">₱0.00</p>
+          <p class="mt-2 text-sm text-slate-500">Net profit for the current period.</p>
+        </article>
+        <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Outflow / Sales</p>
+          <p id="card-sales" class="mt-4 text-3xl font-semibold text-slate-900">₱0.00</p>
+          <p class="mt-2 text-sm text-slate-500">Total sales revenue.</p>
+        </article>
+        <article class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Inflow / Purchases</p>
+          <p id="card-purchases" class="mt-4 text-3xl font-semibold text-slate-900">₱0.00</p>
+          <p class="mt-2 text-sm text-slate-500">Restock and purchase value.</p>
+        </article>
+      </div>
+
+      <div class="space-y-4">
+        <div class="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div class="mb-4 flex items-center justify-between">
+            <div>
+              <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Alerts</p>
+              <h2 class="text-xl font-semibold text-slate-900">Low-Stock Monitor</h2>
+            </div>
+            <button id="refresh-alerts" class="rounded-2xl bg-slate-100 px-3 py-2 text-sm text-slate-700 hover:bg-slate-200">Refresh</button>
+          </div>
+          <div id="admin-alerts" class="space-y-3">
+            <div class="rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900">Low stock alerts will appear here.</div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Inventory Matrix</p>
+          <h2 class="text-xl font-semibold text-slate-900">Stock Inflow / Outflow Control</h2>
+        </div>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <button id="add-product-btn" class="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Add Product</button>
+          <button id="refresh-inventory" class="rounded-2xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Refresh Inventory</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+          <thead class="bg-slate-50 text-slate-700">
+            <tr>
+              <th class="px-4 py-3 text-left">Image</th>
+              <th class="px-4 py-3 text-left">Product</th>
+              <th class="px-4 py-3 text-left">Variant</th>
+              <th class="px-4 py-3 text-right">Stock</th>
+              <th class="px-4 py-3 text-right">Min Warning</th>
+              <th class="px-4 py-3 text-right">Price</th>
+              <th class="px-4 py-3 text-center">Status</th>
+              <th class="px-4 py-3 text-center">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="inventory-table-body" class="divide-y divide-slate-200 bg-white">
+            <tr>
+              <td class="px-4 py-4" colspan="8">Loading inventory...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="product-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-slate-900/60 px-4 py-6">
+    <div class="w-full max-w-xl rounded-3xl bg-white p-6 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Product Details</p>
+          <h2 id="product-modal-title" class="text-2xl font-semibold text-slate-900">Add Product</h2>
+        </div>
+        <button id="product-modal-close" class="rounded-full bg-slate-100 px-3 py-2 text-slate-600 hover:bg-slate-200">Close</button>
+      </div>
+      <div class="grid gap-4">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Product Name</label>
+          <input id="product-name" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Variant</label>
+          <input id="product-variant" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium text-slate-700">Price (₱)</label>
+            <input id="product-price" type="number" min="0" step="0.01" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700">Cost</label>
+            <input id="product-cost" type="number" min="0" step="0.01" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          </div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium text-slate-700">Stock</label>
+            <input id="product-stock" type="number" min="0" step="1" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700">Min Warning</label>
+            <input id="product-min-warning" type="number" min="0" step="1" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          </div>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="text-sm font-medium text-slate-700">Unit</label>
+            <input id="product-unit" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" placeholder="pcs, liters" />
+          </div>
+          <div>
+            <label class="text-sm font-medium text-slate-700">Product Image</label>
+            <input id="product-image" type="file" accept="image/png, image/jpeg, image/jpg, image/gif, image/webp" class="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <img id="product-image-preview" class="mt-3 hidden h-28 w-full max-w-xs overflow-hidden rounded-3xl border border-slate-200 object-cover" alt="Image preview" />
+          </div>
+        </div>
+        <div class="flex items-center justify-end gap-3">
+          <button id="product-save-btn" class="rounded-2xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">Save Product</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="password-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-slate-900/60 px-4 py-6">
+    <div class="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl">
+      <div class="mb-4 flex items-center justify-between">
+        <div>
+          <p class="text-sm uppercase tracking-[0.3em] text-slate-400">Security</p>
+          <h2 class="text-2xl font-semibold text-slate-900">Change Password</h2>
+        </div>
+        <button id="password-modal-close" class="rounded-full bg-slate-100 px-3 py-2 text-slate-600 hover:bg-slate-200">Close</button>
+      </div>
+      <div class="grid gap-4">
+        <div>
+          <label class="text-sm font-medium text-slate-700">Current Password</label>
+          <input id="current-password" type="password" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">New Password</label>
+          <input id="new-password" type="password" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div>
+          <label class="text-sm font-medium text-slate-700">Confirm New Password</label>
+          <input id="confirm-password" type="password" class="mt-2 w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+        </div>
+        <div class="flex items-center justify-end gap-3">
+          <button id="password-save-btn" class="rounded-2xl bg-amber-500 px-4 py-3 text-sm font-semibold text-slate-900 hover:bg-amber-400">Save Password</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
