@@ -271,7 +271,7 @@ function renderCart() {
   cartCount.textContent = `${count} item${count !== 1 ? 's' : ''}`;
   cartTotal.textContent = formatPeso(total);
   finalizeBtn.disabled = cart.length === 0;
-  clearCartBtn.style.display = cart.length > 0 ? '' : 'none';
+  clearCartBtn.disabled = cart.length === 0;
 
   if (cart.length === 0) {
     cartItems.innerHTML = `
