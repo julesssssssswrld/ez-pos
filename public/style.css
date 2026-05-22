@@ -1152,10 +1152,6 @@ img { display: block; max-width: 100%; }
   to { opacity: 1; transform: translateY(0); }
 }
 
-.product-card {
-  /* No animation on load as per user request */
-}
-
 .cart-item {
   animation: fadeIn 0.15s ease both;
 }
