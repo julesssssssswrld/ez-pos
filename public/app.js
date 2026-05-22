@@ -1,767 +1,749 @@
-// app.js - mock authentication, storefront payment, and admin sync for Liquid Soap POS
-const STORAGE_USERS_KEY = 'soap_users';
-const STORAGE_PRODUCTS_KEY = 'soap_products';
-const STORAGE_SALES_KEY = 'soap_sales';
-const STORAGE_SESSION_KEY = 'soap_session';
+'use strict';
 
-function initMockData() {
-  const existingUsers = localStorage.getItem(STORAGE_USERS_KEY);
-  const existingProducts = localStorage.getItem(STORAGE_PRODUCTS_KEY);
+// ── Utilities ──────────────────────────────────────────────────
+const API = '';
 
-  if (!existingUsers) {
-    const users = [
-      { username: 'admin', password: '123', role: 'admin', label: 'Admin Manager' },
-      { username: 'store', password: '123', role: 'store', label: 'Store Watcher' }
-    ];
-    localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
-  }
-
-  if (!existingProducts) {
-    const products = [
-      { id: 1, name: 'Liquid Soap Bulk', variant: '20L Drum', price: 650.00, cost: 420.00, stock: 24, min_warning: 6, unit: 'liters', image: '' },
-      { id: 2, name: 'Liquid Soap Bottle', variant: '500ml', price: 45.00, cost: 28.00, stock: 180, min_warning: 20, unit: 'pcs', image: '' },
-      { id: 3, name: 'Liquid Soap Pouch', variant: '250ml', price: 28.00, cost: 18.00, stock: 320, min_warning: 30, unit: 'pcs', image: '' }
-    ];
-    localStorage.setItem(STORAGE_PRODUCTS_KEY, JSON.stringify(products));
-  }
-
-  if (!localStorage.getItem(STORAGE_SALES_KEY)) {
-    localStorage.setItem(STORAGE_SALES_KEY, JSON.stringify([]));
-  }
-}
-
-function getUsers() {
-  return JSON.parse(localStorage.getItem(STORAGE_USERS_KEY) || '[]');
-}
-
-function saveUsers(users) {
-  localStorage.setItem(STORAGE_USERS_KEY, JSON.stringify(users));
-}
-
-function getProducts() {
-  return JSON.parse(localStorage.getItem(STORAGE_PRODUCTS_KEY) || '[]');
-}
-
-function saveProducts(products) {
-  localStorage.setItem(STORAGE_PRODUCTS_KEY, JSON.stringify(products));
-}
-
-function getSales() {
-  return JSON.parse(localStorage.getItem(STORAGE_SALES_KEY) || '[]');
-}
-
-function saveSales(sales) {
-  localStorage.setItem(STORAGE_SALES_KEY, JSON.stringify(sales));
-}
-
-function setSession(user) {
-  localStorage.setItem(STORAGE_SESSION_KEY, JSON.stringify({ username: user.username, role: user.role }));
-}
-
-function getSession() {
-  return JSON.parse(localStorage.getItem(STORAGE_SESSION_KEY) || 'null');
-}
-
-function clearSession() {
-  localStorage.removeItem(STORAGE_SESSION_KEY);
-}
-
-function loginUser(username, password) {
-  const users = getUsers();
-  const user = users.find(u => u.username === username && u.password === password);
-  if (!user) {
-    return null;
-  }
-  setSession(user);
-  return user;
-}
-
-function redirectAfterLogin(user) {
-  if (user.role === 'admin') {
-    window.location.href = 'admin.html';
-  } else if (user.role === 'store') {
-    window.location.href = 'store.html';
-  } else {
-    window.location.href = 'index.html';
-  }
-}
-
-function requireAuth(allowedRoles = []) {
-  const session = getSession();
-  if (!session || !allowedRoles.includes(session.role)) {
-    window.location.href = 'index.html';
-    return null;
-  }
-  return session;
-}
-
-function logout() {
-  clearSession();
-  window.location.href = 'index.html';
-}
-
-function formatPeso(value) {
+function formatPeso(val) {
   return new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-    maximumFractionDigits: 2
-  }).format(Number(value) || 0);
+    style: 'currency', currency: 'PHP', minimumFractionDigits: 2
+  }).format(Number(val) || 0);
 }
 
-function formatStock(value) {
-  return new Intl.NumberFormat('en-PH', { maximumFractionDigits: 0 }).format(Number(value) || 0);
-}
-
-function updateRoleBadges() {
-  const session = getSession();
-  if (!session) return;
-  const storeBadge = document.getElementById('role-badge');
-  if (storeBadge) {
-    storeBadge.textContent = session.role === 'store' ? 'Cashier' : session.role;
-  }
-  const adminBadge = document.getElementById('admin-role-badge');
-  if (adminBadge) {
-    adminBadge.textContent = session.role === 'admin' ? 'Admin' : session.role;
-  }
-}
-
-function renderStorefront() {
-  const grid = document.getElementById('product-grid');
-  if (!grid) return;
-  const session = requireAuth(['store']);
-  if (!session) return;
-  updateRoleBadges();
-
-  const products = getProducts();
-  grid.innerHTML = '';
-
-  if (products.length === 0) {
-    grid.innerHTML = '<div class="rounded-3xl bg-white p-8 text-center text-slate-500 shadow-sm">No products available.</div>';
-    return;
-  }
-
-  products.forEach(product => {
-    const disabled = product.stock <= 0;
-    const imageSrc = product.image ? product.image : 'https://via.placeholder.com/400x260?text=Liquid+Soap';
-    const card = document.createElement('article');
-    card.className = 'rounded-3xl border border-slate-200 bg-white p-5 shadow-sm';
-    card.innerHTML = `
-      <div class="mb-4 h-40 overflow-hidden rounded-3xl bg-slate-100">
-        <img src="${imageSrc}" alt="${product.name}" class="h-full w-full object-cover" />
-      </div>
-      <div class="space-y-3">
-        <p class="text-sm uppercase tracking-[0.3em] text-slate-400">${product.variant}</p>
-        <h3 class="text-xl font-semibold text-slate-900">${product.name}</h3>
-        <p class="text-sm text-slate-600">Stock: ${formatStock(product.stock)} ${product.unit}</p>
-        <p class="text-lg font-semibold text-slate-900">${formatPeso(product.price)}</p>
-        <button data-product-id="${product.id}" class="purchase-btn w-full rounded-2xl ${disabled ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 text-white hover:bg-emerald-700'} px-4 py-3 text-sm font-semibold" ${disabled ? 'disabled' : ''}>${disabled ? 'Out of Stock' : 'Purchase'}</button>
-      </div>
-    `;
-    grid.appendChild(card);
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString('en-PH', {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
   });
 }
 
-let currentProductId = null;
+function $(sel) { return document.querySelector(sel); }
+function $$(sel) { return document.querySelectorAll(sel); }
 
-function openPaymentModal(productId) {
-  const product = getProducts().find(p => p.id === productId);
-  if (!product) return;
-  currentProductId = productId;
-  const modal = document.getElementById('payment-modal');
-  const title = document.getElementById('modal-product-title');
-  const totalPrice = document.getElementById('modal-total-price');
-  const cashInput = document.getElementById('cash-received');
-  const changeDisplay = document.getElementById('modal-change');
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch(API + path, opts);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
 
-  title.textContent = `${product.name} · ${product.variant}`;
-  totalPrice.textContent = formatPeso(product.price);
-  cashInput.value = '';
-  changeDisplay.textContent = formatPeso(0);
-  modal.classList.remove('hidden');
+function showToast(msg, type = '') {
+  const container = $('#toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 2500);
+}
+
+// ── State ──────────────────────────────────────────────────────
+let cart = [];          // { product, quantity }
+let allProducts = [];
+let editingProductId = null;
+let confirmCallback = null;
+
+// ── Mode Toggle (Cashier / Admin) ──────────────────────────────
+const modeToggle = $('#mode-toggle');
+const pillBtns = $$('.pill-btn');
+const cashierView = $('#cashier-view');
+const adminView = $('#admin-view');
+
+function setMode(mode) {
+  modeToggle.dataset.active = mode;
+  pillBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.mode === mode));
+  cashierView.classList.toggle('active', mode === 'cashier');
+  adminView.classList.toggle('active', mode === 'admin');
+
+  if (mode === 'cashier') {
+    loadProducts();
+    setTimeout(() => $('#cashier-search')?.focus(), 100);
+  } else {
+    loadInventory();
+    loadHistory();
+  }
+}
+
+pillBtns.forEach(btn => {
+  btn.addEventListener('click', () => setMode(btn.dataset.mode));
+});
+
+// ── Admin Tabs ─────────────────────────────────────────────────
+$$('.admin-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    $$('.admin-tab').forEach(t => t.classList.remove('active'));
+    $$('.admin-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    $(`#${tab.dataset.panel}`).classList.add('active');
+  });
+});
+
+// ── Products (Cashier) ─────────────────────────────────────────
+const productGrid = $('#product-grid');
+const cashierSearch = $('#cashier-search');
+const cashierSearchClear = $('#cashier-search-clear');
+const inventorySearchClear = $('#inventory-search-clear');
+let searchTimeout;
+
+
+
+async function loadProducts(query) {
+  try {
+    const qp = query ? `?q=${encodeURIComponent(query)}` : '';
+    const data = await api('GET', `/api/products${qp}`);
+    allProducts = data.products;
+    renderProductGrid(data.products);
+  } catch (err) {
+    productGrid.innerHTML = `<div class="empty-state"><p>Failed to load products</p></div>`;
+  }
+}
+
+function renderProductGrid(products) {
+  if (products.length === 0) {
+    productGrid.innerHTML = `
+      <div class="empty-state" style="grid-column: 1/-1">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/>
+          <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+          <line x1="12" y1="22.08" x2="12" y2="12"/>
+        </svg>
+        <h3>No products found</h3>
+        <p>Try a different search term or add products from the Admin panel.</p>
+      </div>`;
+    return;
+  }
+
+  productGrid.innerHTML = products.map((p, i) => {
+    const outClass = p.stock <= 0 ? ' out-of-stock' : '';
+    let stockClass = '';
+    let stockLabel = `${p.stock} ${p.unit}`;
+    if (p.stock <= 0) { stockClass = 'out'; stockLabel = 'Out of stock'; }
+    else if (p.stock <= p.min_warning) { stockClass = 'low'; stockLabel = `${p.stock} ${p.unit} (low)`; }
+
+    return `
+      <div class="product-card${outClass}" data-product-id="${p.id}">
+        <span class="product-variant">${esc(p.variant)}</span>
+        <span class="product-name">${esc(p.name)}</span>
+        <span class="product-stock ${stockClass}">${stockLabel}</span>
+        ${p.barcode ? `<span class="product-barcode">${esc(p.barcode)}</span>` : ''}
+        <span class="product-price">${formatPeso(p.sale_price)}</span>
+      </div>`;
+  }).join('');
+}
+
+productGrid.addEventListener('click', (e) => {
+  const card = e.target.closest('.product-card');
+  if (!card || card.classList.contains('out-of-stock')) return;
+  const id = Number(card.dataset.productId);
+  const product = allProducts.find(p => p.id === id);
+  if (product) {
+    addToCart(product);
+    cashierSearch.value = '';
+    loadProducts('');
+    cashierSearch.focus();
+  }
+});
+
+cashierSearch.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => loadProducts(cashierSearch.value), 200);
+});
+
+cashierSearchClear.addEventListener('click', () => {
+  cashierSearch.value = '';
+  loadProducts('');
+  cashierSearch.focus();
+});
+
+cashierSearch.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const query = cashierSearch.value.trim().toLowerCase();
+    if (!query) return;
+
+    // Match strategy:
+    // 1. Try exact barcode match (case-insensitive)
+    let matchedProduct = allProducts.find(p => p.barcode && p.barcode.trim().toLowerCase() === query);
+
+    // 2. Try exact name match (case-insensitive)
+    if (!matchedProduct) {
+      matchedProduct = allProducts.find(p => p.name.trim().toLowerCase() === query);
+    }
+
+    // 3. Fallback: if there is exactly 1 product matched in allProducts (or if local match is unique)
+    if (!matchedProduct) {
+      if (allProducts.length === 1) {
+        matchedProduct = allProducts[0];
+      } else {
+        const localMatches = allProducts.filter(p => 
+          p.name.toLowerCase().includes(query) ||
+          p.variant.toLowerCase().includes(query) ||
+          (p.barcode && p.barcode.toLowerCase().includes(query))
+        );
+        if (localMatches.length === 1) {
+          matchedProduct = localMatches[0];
+        }
+      }
+    }
+
+    if (matchedProduct) {
+      if (matchedProduct.stock <= 0) {
+        showToast(`${matchedProduct.name} is out of stock`, 'error');
+        return;
+      }
+      addToCart(matchedProduct);
+      cashierSearch.value = '';
+      loadProducts('');
+      cashierSearch.focus();
+    } else {
+      showToast('No unique matching product found', 'error');
+    }
+  }
+});
+
+// Auto-focus search for barcode scanning
+document.addEventListener('keydown', (e) => {
+  if (cashierView.classList.contains('active') &&
+      !e.target.closest('.modal-backdrop') &&
+      e.target.tagName !== 'INPUT' &&
+      e.target.tagName !== 'TEXTAREA') {
+    cashierSearch.focus();
+  }
+});
+
+// ── Cart ───────────────────────────────────────────────────────
+const cartItems = $('#cart-items');
+const cartCount = $('#cart-count');
+const cartTotal = $('#cart-total');
+const finalizeBtn = $('#finalize-btn');
+const clearCartBtn = $('#clear-cart-btn');
+
+function addToCart(product) {
+  const existing = cart.find(c => c.product.id === product.id);
+  if (existing) {
+    if (existing.quantity < product.stock) {
+      existing.quantity++;
+    } else {
+      showToast(`Maximum stock reached for ${product.name}`, 'error');
+      return;
+    }
+  } else {
+    cart.push({ product, quantity: 1 });
+  }
+  renderCart();
+  showToast(`${product.name} added`);
+}
+
+function updateCartQty(productId, delta) {
+  const item = cart.find(c => c.product.id === productId);
+  if (!item) return;
+  const newQty = item.quantity + delta;
+  if (newQty <= 0) {
+    cart = cart.filter(c => c.product.id !== productId);
+  } else if (newQty > item.product.stock) {
+    showToast('Maximum stock reached', 'error');
+    return;
+  } else {
+    item.quantity = newQty;
+  }
+  renderCart();
+}
+
+function removeFromCart(productId) {
+  cart = cart.filter(c => c.product.id !== productId);
+  renderCart();
+}
+
+function clearCart() {
+  cart = [];
+  renderCart();
+}
+
+function getCartTotal() {
+  return cart.reduce((sum, c) => sum + c.product.sale_price * c.quantity, 0);
+}
+
+function renderCart() {
+  const total = getCartTotal();
+  const count = cart.reduce((s, c) => s + c.quantity, 0);
+
+  cartCount.textContent = `${count} item${count !== 1 ? 's' : ''}`;
+  cartTotal.textContent = formatPeso(total);
+  finalizeBtn.disabled = cart.length === 0;
+  clearCartBtn.style.display = cart.length > 0 ? '' : 'none';
+
+  if (cart.length === 0) {
+    cartItems.innerHTML = `
+      <div class="cart-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+          <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/>
+        </svg>
+        <p>Cart is empty</p>
+        <p style="font-size:0.75rem">Tap a product to add it here</p>
+      </div>`;
+    return;
+  }
+
+  cartItems.innerHTML = cart.map(c => `
+    <div class="cart-item">
+      <div class="cart-item-info">
+        <div class="cart-item-name">${esc(c.product.name)} ${esc(c.product.variant)}</div>
+        <div class="cart-item-price">${formatPeso(c.product.sale_price)} each</div>
+      </div>
+      <div class="cart-item-qty">
+        <button class="remove-btn" data-id="${c.product.id}" data-action="minus" aria-label="Decrease quantity">−</button>
+        <span class="qty-value">${c.quantity}</span>
+        <button data-id="${c.product.id}" data-action="plus" aria-label="Increase quantity">+</button>
+      </div>
+      <div class="cart-item-subtotal">${formatPeso(c.product.sale_price * c.quantity)}</div>
+    </div>
+  `).join('');
+}
+
+cartItems.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  if (btn.dataset.action === 'plus') updateCartQty(id, 1);
+  else if (btn.dataset.action === 'minus') updateCartQty(id, -1);
+});
+
+clearCartBtn.addEventListener('click', () => {
+  showConfirm('Clear Cart', 'Remove all items from the current sale?', () => {
+    clearCart();
+    showToast('Cart cleared');
+  });
+});
+
+// ── Payment Modal ──────────────────────────────────────────────
+const paymentModal = $('#payment-modal');
+const paymentSummary = $('#payment-summary');
+const cashDisplay = $('#cash-display');
+const changeDisplay = $('#change-display');
+const confirmPaymentBtn = $('#confirm-payment-btn');
+let cashInput = '';
+
+function openPaymentModal() {
+  const total = getCartTotal();
+  cashInput = '';
+  updateCashDisplay();
+
+  // Build summary
+  paymentSummary.innerHTML = `
+    <div class="payment-row"><span class="label">Items</span><span class="value">${cart.reduce((s, c) => s + c.quantity, 0)}</span></div>
+    <div class="payment-row total"><span class="label">Total Due</span><span class="value">${formatPeso(total)}</span></div>
+  `;
+
+  paymentModal.classList.add('open');
 }
 
 function closePaymentModal() {
-  const modal = document.getElementById('payment-modal');
-  if (modal) {
-    modal.classList.add('hidden');
-  }
-  currentProductId = null;
+  paymentModal.classList.remove('open');
+  cashInput = '';
 }
 
-function updateChange() {
-  const cashInput = document.getElementById('cash-received');
-  const changeDisplay = document.getElementById('modal-change');
-  if (!cashInput || !changeDisplay) return;
-  const cashValue = parseFloat(cashInput.value) || 0;
-  const product = getProducts().find(p => p.id === currentProductId);
-  if (!product) {
-    changeDisplay.textContent = formatPeso(0);
-    return;
-  }
-  const change = cashValue - product.price;
-  changeDisplay.textContent = formatPeso(change >= 0 ? change : 0);
+function updateCashDisplay() {
+  const cash = parseFloat(cashInput) || 0;
+  const total = getCartTotal();
+  const change = Math.max(0, cash - total);
+
+  cashDisplay.textContent = cashInput ? `₱${cashInput}` : '₱0.00';
+  cashDisplay.classList.toggle('has-value', cashInput.length > 0);
+
+  changeDisplay.innerHTML = `
+    <span class="label">Change</span>
+    <span class="value">${formatPeso(change)}</span>
+  `;
+  confirmPaymentBtn.disabled = cash < total;
 }
 
-function confirmSale() {
-  const cashInput = document.getElementById('cash-received');
-  const product = getProducts().find(p => p.id === currentProductId);
-  if (!product) {
-    alert('Product not found.');
+// Numpad handlers
+$('#numpad').addEventListener('click', (e) => {
+  const btn = e.target.closest('.numpad-btn');
+  if (!btn) return;
+  const key = btn.dataset.key;
+
+  if (key >= '0' && key <= '9') {
+    if (cashInput.length < 10) cashInput += key;
+  } else if (key === '.') {
+    if (!cashInput.includes('.')) cashInput += cashInput.length === 0 ? '0.' : '.';
+  } else if (key === 'backspace') {
+    cashInput = cashInput.slice(0, -1);
+  } else if (key === 'clear') {
+    cashInput = '';
+  } else if (key === 'exact') {
+    cashInput = getCartTotal().toString();
+  } else if (key === 'confirm') {
+    if (!confirmPaymentBtn.disabled) processSale();
     return;
   }
 
-  const cashValue = parseFloat(cashInput.value) || 0;
-  if (cashValue < product.price) {
-    alert('Insufficient cash. Please enter enough money to cover the total price.');
-    return;
-  }
-  if (product.stock <= 0) {
-    alert('This item is out of stock.');
+  updateCashDisplay();
+});
+
+// Quick amount buttons
+$('#quick-amounts').addEventListener('click', (e) => {
+  const btn = e.target.closest('.quick-amount-btn');
+  if (!btn) return;
+  const amount = Number(btn.dataset.amount);
+  const current = parseFloat(cashInput) || 0;
+  cashInput = (current + amount).toString();
+  updateCashDisplay();
+});
+
+// Keyboard support in payment modal
+document.addEventListener('keydown', (e) => {
+  if (!paymentModal.classList.contains('open')) return;
+  if (e.key >= '0' && e.key <= '9') {
+    if (cashInput.length < 10) cashInput += e.key;
+  } else if (e.key === '.') {
+    if (!cashInput.includes('.')) cashInput += cashInput.length === 0 ? '0.' : '.';
+  } else if (e.key === 'Backspace') {
+    cashInput = cashInput.slice(0, -1);
+  } else if (e.key === 'Escape') {
     closePaymentModal();
     return;
-  }
-
-  const products = getProducts();
-  const updatedProducts = products.map(item => {
-    if (item.id === product.id) {
-      return { ...item, stock: item.stock - 1 };
-    }
-    return item;
-  });
-  saveProducts(updatedProducts);
-
-  const sales = getSales();
-  const totalAmount = product.price;
-  const profitAmount = totalAmount - product.cost;
-  const newSale = {
-    id: Date.now(),
-    product_id: product.id,
-    product_name: product.name,
-    quantity: 1,
-    unit_price: product.price,
-    total_amount: totalAmount,
-    cost_amount: product.cost,
-    profit_amount: profitAmount,
-    created_at: new Date().toISOString()
-  };
-  saveSales([...sales, newSale]);
-
-  const change = cashValue - totalAmount;
-  alert(`Sale completed. Change: ${formatPeso(change)}`);
-  closePaymentModal();
-  renderStorefront();
-}
-
-function setupStorePage() {
-  const grid = document.getElementById('product-grid');
-  if (!grid) return;
-  const session = requireAuth(['store']);
-  if (!session) return;
-  updateRoleBadges();
-  renderStorefront();
-
-  grid.addEventListener('click', event => {
-    const button = event.target.closest('.purchase-btn');
-    if (!button || button.disabled) return;
-    const productId = Number(button.dataset.productId);
-    openPaymentModal(productId);
-  });
-
-  const closeButton = document.getElementById('modal-close');
-  if (closeButton) {
-    closeButton.addEventListener('click', closePaymentModal);
-  }
-
-  const cashInput = document.getElementById('cash-received');
-  if (cashInput) {
-    cashInput.addEventListener('input', updateChange);
-  }
-
-  const confirmButton = document.getElementById('confirm-sale');
-  if (confirmButton) {
-    confirmButton.addEventListener('click', confirmSale);
-  }
-
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', logout);
-  }
-
-  window.addEventListener('keydown', event => {
-    if (event.key === 'Escape') {
-      closePaymentModal();
-    }
-  });
-}
-
-function getTodaySales() {
-  const sales = getSales();
-  const todayKey = new Date().toISOString().slice(0, 10);
-  return sales.filter(sale => sale.created_at.slice(0, 10) === todayKey);
-}
-
-function renderAdminCards() {
-  const revenueEl = document.getElementById('card-revenue');
-  const profitEl = document.getElementById('card-profit');
-  const salesEl = document.getElementById('card-sales');
-  const purchasesEl = document.getElementById('card-purchases');
-  if (!revenueEl || !profitEl || !salesEl || !purchasesEl) return;
-
-  const todaysSales = getTodaySales();
-  const revenue = todaysSales.reduce((sum, sale) => sum + sale.total_amount, 0);
-  const profit = todaysSales.reduce((sum, sale) => sum + sale.profit_amount, 0);
-  const purchases = 0;
-
-  revenueEl.textContent = formatPeso(revenue);
-  profitEl.textContent = formatPeso(profit);
-  salesEl.textContent = formatPeso(revenue);
-  purchasesEl.textContent = formatPeso(purchases);
-}
-
-function renderAdminAlerts() {
-  const alertContainer = document.getElementById('admin-alerts');
-  if (!alertContainer) return;
-  const products = getProducts();
-  const alerts = products
-    .filter(product => product.stock <= product.min_warning)
-    .sort((a, b) => a.stock - b.stock);
-
-  if (alerts.length === 0) {
-    alertContainer.innerHTML = '<div class="rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-emerald-900">All products are above their warning thresholds.</div>';
+  } else if (e.key === 'Enter') {
+    if (!confirmPaymentBtn.disabled) processSale();
+    return;
+  } else {
     return;
   }
+  e.preventDefault();
+  updateCashDisplay();
+});
 
-  alertContainer.innerHTML = '';
-  alerts.forEach(product => {
-    const status = product.stock <= 0 ? 'Out of stock' : 'Low stock';
-    const alertCard = document.createElement('div');
-    if (product.stock <= 0) {
-      alertCard.className = 'rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-900';
-    } else {
-      alertCard.className = 'rounded-2xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-900';
-    }
-    alertCard.innerHTML = `
-      <div class="font-semibold text-slate-900">${product.name} · ${product.variant}</div>
-      <div class="mt-1">Stock: ${formatStock(product.stock)} ${product.unit} — ${status}</div>
-    `;
-    alertContainer.appendChild(alertCard);
-  });
+async function processSale() {
+  const cash = parseFloat(cashInput) || 0;
+  const total = getCartTotal();
+  if (cash < total) return;
+
+  try {
+    confirmPaymentBtn.disabled = true;
+    const items = cart.map(c => ({ product_id: c.product.id, quantity: c.quantity }));
+    const result = await api('POST', '/api/sales', { items, cash_tendered: cash });
+
+    closePaymentModal();
+    clearCart();
+
+    showToast(`Sale #${result.sale.id} completed — Change: ${formatPeso(result.sale.change_amount)}`, 'success');
+    loadProducts(cashierSearch.value);
+  } catch (err) {
+    showToast(err.message, 'error');
+    confirmPaymentBtn.disabled = false;
+  }
 }
 
-function renderAdminInventory() {
-  const tbody = document.getElementById('inventory-table-body');
-  if (!tbody) return;
-  const products = getProducts();
-  tbody.innerHTML = '';
+finalizeBtn.addEventListener('click', openPaymentModal);
+$('#payment-close').addEventListener('click', closePaymentModal);
+paymentModal.addEventListener('click', (e) => {
+  if (e.target === paymentModal) closePaymentModal();
+});
 
+// ── Inventory (Admin) ──────────────────────────────────────────
+const inventoryTbody = $('#inventory-tbody');
+const inventorySearch = $('#inventory-search');
+let invSearchTimeout;
+
+async function loadInventory(query) {
+  try {
+    const qp = query ? `?q=${encodeURIComponent(query)}` : '';
+    const data = await api('GET', `/api/products${qp}`);
+    renderInventory(data.products);
+  } catch (err) {
+    inventoryTbody.innerHTML = `<tr><td colspan="8" class="empty-state">Failed to load inventory</td></tr>`;
+  }
+}
+
+function renderInventory(products) {
   if (products.length === 0) {
-    tbody.innerHTML = '<tr><td class="px-4 py-4 text-center text-slate-500" colspan="8">No inventory items found.</td></tr>';
+    inventoryTbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><h3>No products</h3><p>Add your first product to get started.</p></div></td></tr>`;
     return;
   }
 
-  products.forEach(product => {
-    const status = product.stock <= 0 ? 'Out' : product.stock <= product.min_warning ? 'Low' : 'OK';
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td class="px-4 py-4 text-left">
-        <div class="inline-flex h-14 w-14 overflow-hidden rounded-3xl bg-slate-100">
-          <img src="${product.image || 'https://via.placeholder.com/64?text=No+Img'}" alt="${product.name}" class="h-full w-full object-cover" />
-        </div>
-      </td>
-      <td class="px-4 py-4 text-left">${product.name}</td>
-      <td class="px-4 py-4 text-left">${product.variant}</td>
-      <td class="px-4 py-4 text-right">${formatStock(product.stock)} ${product.unit}</td>
-      <td class="px-4 py-4 text-right">${formatStock(product.min_warning)}</td>
-      <td class="px-4 py-4 text-right">${formatPeso(product.price)}</td>
-      <td class="px-4 py-4 text-center">
-        <span class="inline-flex rounded-full px-3 py-1 text-xs font-semibold ${product.stock <= 0 ? 'bg-red-100 text-red-800' : product.stock <= product.min_warning ? 'bg-yellow-100 text-yellow-800' : 'bg-emerald-100 text-emerald-800'}">${status}</span>
-      </td>
-      <td class="px-4 py-4 text-center space-x-2">
-        <button data-action="edit" data-product-id="${product.id}" class="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200">Edit</button>
-        <button data-action="remove" data-product-id="${product.id}" class="rounded-2xl bg-red-100 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-200">Remove</button>
-      </td>
-    `;
-    tbody.appendChild(row);
-  });
+  inventoryTbody.innerHTML = products.map(p => {
+    let badgeClass = 'badge-ok', statusText = 'OK';
+    if (p.stock <= 0) { badgeClass = 'badge-danger'; statusText = 'Out'; }
+    else if (p.stock <= p.min_warning) { badgeClass = 'badge-warn'; statusText = 'Low'; }
+
+    return `
+      <tr>
+        <td><strong>${esc(p.name)}</strong></td>
+        <td>${esc(p.variant)}</td>
+        <td style="font-family:var(--font-mono);font-size:var(--font-xs)">${esc(p.barcode || '—')}</td>
+        <td class="text-right">${p.stock} ${esc(p.unit)}</td>
+        <td class="text-right">${formatPeso(p.cost_price)}</td>
+        <td class="text-right">${formatPeso(p.sale_price)}</td>
+        <td class="text-center"><span class="badge ${badgeClass}">${statusText}</span></td>
+        <td class="text-center">
+          <div class="action-btns" style="justify-content:center">
+            <button class="action-btn edit" data-id="${p.id}" data-action="edit">Edit</button>
+            <button class="action-btn delete" data-id="${p.id}" data-action="delete">Delete</button>
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
 }
 
-function openModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) modal.classList.remove('hidden');
-}
+inventoryTbody.addEventListener('click', (e) => {
+  const btn = e.target.closest('.action-btn');
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  if (btn.dataset.action === 'edit') openProductModal(id);
+  else if (btn.dataset.action === 'delete') deleteProduct(id);
+});
 
-function closeModal(modalId) {
-  const modal = document.getElementById(modalId);
-  if (modal) modal.classList.add('hidden');
-}
+inventorySearch.addEventListener('input', () => {
+  clearTimeout(invSearchTimeout);
+  invSearchTimeout = setTimeout(() => loadInventory(inventorySearch.value), 200);
+});
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
-    reader.onerror = () => reject(new Error('Unable to read image file'));
-    reader.readAsDataURL(file);
-  });
-}
+inventorySearchClear.addEventListener('click', () => {
+  inventorySearch.value = '';
+  loadInventory('');
+  inventorySearch.focus();
+});
 
-let editingProductId = null;
+// ── Product Modal (Add/Edit) ───────────────────────────────────
+const productModal = $('#product-modal');
 
 function openProductModal(productId = null) {
-  const title = document.getElementById('product-modal-title');
-  const nameInput = document.getElementById('product-name');
-  const variantInput = document.getElementById('product-variant');
-  const priceInput = document.getElementById('product-price');
-  const costInput = document.getElementById('product-cost');
-  const stockInput = document.getElementById('product-stock');
-  const warningInput = document.getElementById('product-min-warning');
-  const unitInput = document.getElementById('product-unit');
-  const imageInput = document.getElementById('product-image');
-  const imagePreview = document.getElementById('product-image-preview');
-
   editingProductId = productId;
+  $('#product-modal-title').textContent = productId ? 'Edit Product' : 'Add Product';
+
   if (productId) {
-    const product = getProducts().find(p => p.id === productId);
-    if (product) {
-      title.textContent = 'Edit Product';
-      nameInput.value = product.name;
-      variantInput.value = product.variant;
-      priceInput.value = product.price;
-      costInput.value = product.cost;
-      stockInput.value = product.stock;
-      warningInput.value = product.min_warning;
-      unitInput.value = product.unit;
-      imageInput.value = '';
-      if (product.image) {
-        imagePreview.src = product.image;
-        imagePreview.classList.remove('hidden');
-      } else {
-        imagePreview.src = '';
-        imagePreview.classList.add('hidden');
-      }
-    }
+    api('GET', `/api/products/${productId}`).then(data => {
+      const p = data.product;
+      $('#pf-name').value = p.name;
+      $('#pf-variant').value = p.variant;
+      $('#pf-unit').value = p.unit;
+      $('#pf-cost').value = p.cost_price;
+      $('#pf-price').value = p.sale_price;
+      $('#pf-stock').value = p.stock;
+      $('#pf-warning').value = p.min_warning;
+      $('#pf-barcode').value = p.barcode || '';
+    });
   } else {
-    title.textContent = 'Add Product';
-    nameInput.value = '';
-    variantInput.value = '';
-    priceInput.value = '';
-    costInput.value = '';
-    stockInput.value = '';
-    warningInput.value = '';
-    unitInput.value = '';
-    imageInput.value = '';
-    imagePreview.src = '';
-    imagePreview.classList.add('hidden');
+    $('#pf-name').value = '';
+    $('#pf-variant').value = '';
+    $('#pf-unit').value = 'pcs';
+    $('#pf-cost').value = '';
+    $('#pf-price').value = '';
+    $('#pf-stock').value = '';
+    $('#pf-warning').value = '';
+    $('#pf-barcode').value = '';
   }
-  openModal('product-modal');
+
+  productModal.classList.add('open');
+  setTimeout(() => $('#pf-name').focus(), 150);
 }
 
-async function saveProductFromModal() {
-  const nameInput = document.getElementById('product-name');
-  const variantInput = document.getElementById('product-variant');
-  const priceInput = document.getElementById('product-price');
-  const costInput = document.getElementById('product-cost');
-  const stockInput = document.getElementById('product-stock');
-  const warningInput = document.getElementById('product-min-warning');
-  const unitInput = document.getElementById('product-unit');
-  const imageInput = document.getElementById('product-image');
-  const imagePreview = document.getElementById('product-image-preview');
+function closeProductModal() {
+  productModal.classList.remove('open');
+  editingProductId = null;
+}
 
-  const name = nameInput.value.trim();
-  const variant = variantInput.value.trim();
-  const price = parseFloat(priceInput.value) || 0;
-  const cost = parseFloat(costInput.value) || 0;
-  const stock = parseInt(stockInput.value, 10) || 0;
-  const min_warning = parseInt(warningInput.value, 10) || 0;
-  const unit = unitInput.value.trim() || 'pcs';
-  let image = '';
+async function saveProduct() {
+  const body = {
+    name: $('#pf-name').value.trim(),
+    variant: $('#pf-variant').value.trim(),
+    unit: $('#pf-unit').value.trim() || 'pcs',
+    cost_price: parseFloat($('#pf-cost').value) || 0,
+    sale_price: parseFloat($('#pf-price').value) || 0,
+    stock: parseFloat($('#pf-stock').value) || 0,
+    min_warning: parseFloat($('#pf-warning').value) || 0,
+    barcode: $('#pf-barcode').value.trim(),
+  };
 
-  if (imageInput.files && imageInput.files[0]) {
-    try {
-      image = await readFileAsDataUrl(imageInput.files[0]);
-      imagePreview.src = image;
-      imagePreview.classList.remove('hidden');
-    } catch (error) {
-      alert('Failed to load the selected image. Please try a different file.');
-      return;
+  if (!body.name) {
+    showToast('Product name is required', 'error');
+    return;
+  }
+
+  try {
+    if (editingProductId) {
+      await api('PUT', `/api/products/${editingProductId}`, body);
+      showToast('Product updated', 'success');
+    } else {
+      await api('POST', '/api/products', body);
+      showToast('Product added', 'success');
     }
-  } else if (editingProductId) {
-    const existingProduct = getProducts().find(p => p.id === editingProductId);
-    image = existingProduct?.image || '';
+    closeProductModal();
+    loadInventory(inventorySearch.value);
+    loadProducts(cashierSearch.value);
+  } catch (err) {
+    showToast(err.message, 'error');
   }
-
-  if (!name || !variant) {
-    alert('Product name and variant are required.');
-    return;
-  }
-
-  const products = getProducts();
-  if (editingProductId) {
-    const updatedProducts = products.map(product => product.id === editingProductId ? { ...product, name, variant, price, cost, stock, min_warning, unit, image } : product);
-    saveProducts(updatedProducts);
-    alert('Product updated successfully.');
-  } else {
-    const newProduct = {
-      id: Date.now(),
-      name,
-      variant,
-      price,
-      cost,
-      stock,
-      min_warning,
-      unit,
-      image
-    };
-    saveProducts([...products, newProduct]);
-    alert('Product added successfully.');
-  }
-
-  closeModal('product-modal');
-  renderAdminInventory();
-  renderAdminAlerts();
 }
 
-function removeProduct(productId) {
-  const products = getProducts();
-  const product = products.find(p => p.id === productId);
-  if (!product) return;
-  if (!confirm(`Remove ${product.name} (${product.variant}) from inventory?`)) return;
-  saveProducts(products.filter(p => p.id !== productId));
-  renderAdminInventory();
-  renderAdminAlerts();
-  alert('Product removed.');
-}
-
-function openPasswordModal() {
-  document.getElementById('current-password').value = '';
-  document.getElementById('new-password').value = '';
-  document.getElementById('confirm-password').value = '';
-  openModal('password-modal');
-}
-
-function savePassword() {
-  const currentPassword = document.getElementById('current-password').value;
-  const newPassword = document.getElementById('new-password').value;
-  const confirmPassword = document.getElementById('confirm-password').value;
-  const session = getSession();
-  if (!session) return;
-
-  if (!currentPassword || !newPassword || !confirmPassword) {
-    alert('Please fill all password fields.');
-    return;
-  }
-  if (newPassword !== confirmPassword) {
-    alert('New password and confirmation do not match.');
-    return;
-  }
-
-  const users = getUsers();
-  const currentUser = users.find(u => u.username === session.username);
-  if (!currentUser || currentUser.password !== currentPassword) {
-    alert('Current password is incorrect.');
-    return;
-  }
-
-  currentUser.password = newPassword;
-  saveUsers(users);
-  alert('Password updated successfully.');
-  closeModal('password-modal');
-}
-
-function resetSystem() {
-  if (!confirm('Reset the system to default settings and clear sales data?')) return;
-  localStorage.removeItem(STORAGE_PRODUCTS_KEY);
-  localStorage.removeItem(STORAGE_SALES_KEY);
-  localStorage.removeItem(STORAGE_USERS_KEY);
-  initMockData();
-  renderAdminCards();
-  renderAdminAlerts();
-  renderAdminInventory();
-  alert('System reset to defaults.');
-}
-
-function exportToExcel() {
-  window.location.href = '/api/export?format=xlsx';
-}
-
-function setupAdminPage() {
-  const revenueEl = document.getElementById('card-revenue');
-  if (!revenueEl) return;
-  const session = requireAuth(['admin']);
-  if (!session) return;
-  updateRoleBadges();
-  renderAdminCards();
-  renderAdminAlerts();
-  renderAdminInventory();
-
-  const settingsBtn = document.getElementById('admin-settings-btn');
-  const settingsDropdown = document.getElementById('admin-settings-dropdown');
-  if (settingsBtn && settingsDropdown) {
-    settingsBtn.addEventListener('click', event => {
-      event.stopPropagation();
-      const isVisible = !settingsDropdown.classList.contains('invisible');
-      if (isVisible) {
-        settingsDropdown.classList.add('invisible');
-      } else {
-        settingsDropdown.classList.remove('invisible');
-      }
-    });
-  }
-
-  const dropdownExportBtn = document.getElementById('dropdown-export-btn');
-  if (dropdownExportBtn) {
-    dropdownExportBtn.addEventListener('click', () => {
-      if (settingsDropdown) settingsDropdown.classList.add('invisible');
-      exportToExcel();
-    });
-  }
-
-  const dropdownChangePasswordBtn = document.getElementById('dropdown-change-password-btn');
-  if (dropdownChangePasswordBtn) {
-    dropdownChangePasswordBtn.addEventListener('click', () => {
-      if (settingsDropdown) settingsDropdown.classList.add('invisible');
-      openPasswordModal();
-    });
-  }
-
-  const dropdownResetSystemBtn = document.getElementById('dropdown-reset-system-btn');
-  if (dropdownResetSystemBtn) {
-    dropdownResetSystemBtn.addEventListener('click', () => {
-      if (settingsDropdown) settingsDropdown.classList.add('invisible');
-      resetSystem();
-    });
-  }
-
-  const dropdownLogoutBtn = document.getElementById('dropdown-logout-btn');
-  if (dropdownLogoutBtn) {
-    dropdownLogoutBtn.addEventListener('click', () => {
-      if (settingsDropdown) settingsDropdown.classList.add('invisible');
-      logout();
-    });
-  }
-
-  document.addEventListener('click', () => {
-    if (settingsDropdown && !settingsDropdown.classList.contains('invisible')) {
-      settingsDropdown.classList.add('invisible');
-    }
-  });
-
-  const settingsLogoutBtn = document.getElementById('settings-logout-btn');
-  if (settingsLogoutBtn) {
-    settingsLogoutBtn.addEventListener('click', logout);
-  }
-
-  const refreshAlertsBtn = document.getElementById('refresh-alerts');
-  if (refreshAlertsBtn) {
-    refreshAlertsBtn.addEventListener('click', () => {
-      renderAdminAlerts();
-      renderAdminCards();
-      renderAdminInventory();
-    });
-  }
-
-  const refreshInventoryBtn = document.getElementById('refresh-inventory');
-  if (refreshInventoryBtn) {
-    refreshInventoryBtn.addEventListener('click', () => {
-      renderAdminInventory();
-      renderAdminCards();
-      renderAdminAlerts();
-    });
-  }
-
-  const addProductBtn = document.getElementById('add-product-btn');
-  if (addProductBtn) {
-    addProductBtn.addEventListener('click', () => openProductModal());
-  }
-
-  const exportBtn = document.getElementById('export-excel');
-  if (exportBtn) {
-    exportBtn.addEventListener('click', exportToExcel);
-  }
-
-  const changePasswordBtn = document.getElementById('change-password-btn');
-  if (changePasswordBtn) {
-    changePasswordBtn.addEventListener('click', openPasswordModal);
-  }
-
-  const resetBtn = document.getElementById('reset-system-btn');
-  if (resetBtn) {
-    resetBtn.addEventListener('click', resetSystem);
-  }
-
-  const productModalClose = document.getElementById('product-modal-close');
-  if (productModalClose) {
-    productModalClose.addEventListener('click', () => closeModal('product-modal'));
-  }
-
-  const productImageInput = document.getElementById('product-image');
-  if (productImageInput) {
-    productImageInput.addEventListener('change', async event => {
-      const file = event.target.files?.[0];
-      const imagePreview = document.getElementById('product-image-preview');
-      if (!file || !imagePreview) return;
+async function deleteProduct(id) {
+  try {
+    const data = await api('GET', `/api/products/${id}`);
+    const p = data.product;
+    showConfirm('Delete Product', `Remove "${p.name} ${p.variant}" from inventory? This cannot be undone.`, async () => {
       try {
-        imagePreview.src = await readFileAsDataUrl(file);
-        imagePreview.classList.remove('hidden');
-      } catch (error) {
-        imagePreview.classList.add('hidden');
+        await api('DELETE', `/api/products/${id}`);
+        showToast('Product deleted', 'success');
+        loadInventory(inventorySearch.value);
+        loadProducts(cashierSearch.value);
+      } catch (err) {
+        showToast(err.message, 'error');
       }
     });
+  } catch (err) {
+    showToast(err.message, 'error');
   }
+}
 
-  const productSaveBtn = document.getElementById('product-save-btn');
-  if (productSaveBtn) {
-    productSaveBtn.addEventListener('click', saveProductFromModal);
-  }
+$('#add-product-btn').addEventListener('click', () => openProductModal());
+$('#product-save-btn').addEventListener('click', saveProduct);
+$('#product-cancel-btn').addEventListener('click', closeProductModal);
+$('#product-modal-close').addEventListener('click', closeProductModal);
+productModal.addEventListener('click', (e) => { if (e.target === productModal) closeProductModal(); });
 
-  const passwordModalClose = document.getElementById('password-modal-close');
-  if (passwordModalClose) {
-    passwordModalClose.addEventListener('click', () => closeModal('password-modal'));
-  }
-
-  const passwordSaveBtn = document.getElementById('password-save-btn');
-  if (passwordSaveBtn) {
-    passwordSaveBtn.addEventListener('click', savePassword);
-  }
-
-  const inventoryBody = document.getElementById('inventory-table-body');
-  if (inventoryBody) {
-    inventoryBody.addEventListener('click', event => {
-      const button = event.target.closest('button');
-      if (!button) return;
-      const action = button.dataset.action;
-      const productId = Number(button.dataset.productId);
-      if (action === 'edit') {
-        openProductModal(productId);
-      } else if (action === 'remove') {
-        removeProduct(productId);
-      }
-    });
-  }
-
-  window.addEventListener('storage', event => {
-    if (event.key === STORAGE_PRODUCTS_KEY || event.key === STORAGE_SALES_KEY) {
-      renderAdminCards();
-      renderAdminAlerts();
-      renderAdminInventory();
-    }
+// Handle Enter key in product form
+$$('#product-modal .form-input').forEach(input => {
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveProduct();
   });
+});
+
+// ── History (Admin) ────────────────────────────────────────────
+const historyList = $('#history-list');
+
+async function loadHistory() {
+  try {
+    const data = await api('GET', '/api/sales');
+    renderHistory(data.sales);
+  } catch (err) {
+    historyList.innerHTML = `<div class="empty-state"><p>Failed to load history</p></div>`;
+  }
 }
 
-function initializePage() {
-  setupStorePage();
-  setupAdminPage();
+function renderHistory(sales) {
+  if (sales.length === 0) {
+    historyList.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+        </svg>
+        <h3>No transactions yet</h3>
+        <p>Completed sales will appear here.</p>
+      </div>`;
+    return;
+  }
+
+  historyList.innerHTML = sales.map(s => `
+    <div class="history-card" data-sale-id="${s.id}">
+      <div class="history-card-header" data-sale-id="${s.id}">
+        <div class="history-card-left">
+          <span class="history-card-id">Sale #${s.id}</span>
+          <span class="history-card-date">${formatDate(s.created_at)}</span>
+        </div>
+        <div class="history-card-right">
+          <span class="history-card-items-count">${s.item_count} item${s.item_count !== 1 ? 's' : ''}</span>
+          <span class="history-card-total">${formatPeso(s.total_amount)}</span>
+          <svg class="history-card-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+      <div class="history-card-body" id="sale-detail-${s.id}">
+        <p style="color:var(--text-muted);font-size:var(--font-sm)">Loading...</p>
+      </div>
+    </div>
+  `).join('');
 }
 
-// Initialize the data on every page load
-initMockData();
-initializePage();
+historyList.addEventListener('click', async (e) => {
+  const header = e.target.closest('.history-card-header');
+  if (!header) return;
+  const card = header.closest('.history-card');
+  const saleId = card.dataset.saleId;
+  const wasExpanded = card.classList.contains('expanded');
 
-window.loginUser = loginUser;
-window.redirectAfterLogin = redirectAfterLogin;
-window.requireAuth = requireAuth;
-window.logout = logout;
-window.getSession = getSession;
-window.getProducts = getProducts;
-window.saveProducts = saveProducts;
-window.getSales = getSales;
-window.saveSales = saveSales;
+  // Collapse all others
+  $$('.history-card.expanded').forEach(c => c.classList.remove('expanded'));
+
+  if (wasExpanded) return;
+
+  card.classList.add('expanded');
+
+  // Load detail
+  const detailEl = $(`#sale-detail-${saleId}`);
+  try {
+    const data = await api('GET', `/api/sales/${saleId}`);
+    const items = data.items;
+    const sale = data.sale;
+
+    detailEl.innerHTML = `
+      <table class="history-detail-table">
+        <thead>
+          <tr><th>Product</th><th>Variant</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th><th style="text-align:right">Subtotal</th></tr>
+        </thead>
+        <tbody>
+          ${items.map(it => `
+            <tr>
+              <td>${esc(it.product_name)}</td>
+              <td>${esc(it.product_variant)}</td>
+              <td style="text-align:right">${it.quantity}</td>
+              <td style="text-align:right">${formatPeso(it.unit_price)}</td>
+              <td style="text-align:right">${formatPeso(it.subtotal)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      <div class="history-payment-info">
+        <div>Cash: <span>${formatPeso(sale.cash_tendered)}</span></div>
+        <div>Change: <span>${formatPeso(sale.change_amount)}</span></div>
+      </div>
+    `;
+  } catch (err) {
+    detailEl.innerHTML = `<p style="color:var(--danger)">Failed to load details</p>`;
+  }
+});
+
+// ── Confirm Modal ──────────────────────────────────────────────
+const confirmModalEl = $('#confirm-modal');
+
+function showConfirm(title, message, onConfirm) {
+  $('#confirm-modal-title').textContent = title;
+  $('#confirm-modal-message').textContent = message;
+  confirmCallback = onConfirm;
+  confirmModalEl.classList.add('open');
+}
+
+function closeConfirmModal() {
+  confirmModalEl.classList.remove('open');
+  confirmCallback = null;
+}
+
+$('#confirm-yes-btn').addEventListener('click', () => {
+  if (confirmCallback) confirmCallback();
+  closeConfirmModal();
+});
+$('#confirm-no-btn').addEventListener('click', closeConfirmModal);
+$('#confirm-modal-close').addEventListener('click', closeConfirmModal);
+confirmModalEl.addEventListener('click', (e) => { if (e.target === confirmModalEl) closeConfirmModal(); });
+
+// ── Escape key for all modals ──────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (confirmModalEl.classList.contains('open')) closeConfirmModal();
+    else if (productModal.classList.contains('open')) closeProductModal();
+    else if (paymentModal.classList.contains('open')) closePaymentModal();
+  }
+});
+
+// ── HTML Escaping ──────────────────────────────────────────────
+function esc(str) {
+  const d = document.createElement('div');
+  d.textContent = str || '';
+  return d.innerHTML;
+}
+
+// ── Init ───────────────────────────────────────────────────────
+loadProducts();
+renderCart();

@@ -11,166 +11,255 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// SQLite database file (created on demand)
-const DBSOURCE = path.join(__dirname, 'inventory.db');
-const db = new sqlite3.Database(DBSOURCE, (err) => {
-  if (err) {
-    console.error('Failed to connect to SQLite database:', err.message);
-    process.exit(1);
+// ── Database ───────────────────────────────────────────────────
+const DB_PATH = path.join(__dirname, 'soap.db');
+const db = new sqlite3.Database(DB_PATH, (err) => {
+  if (err) { console.error('DB open failed:', err.message); process.exit(1); }
+  console.log('Connected to', DB_PATH);
+});
+
+// Promisified helpers
+const dbRun = (sql, params = []) => new Promise((resolve, reject) => {
+  db.run(sql, params, function (err) { err ? reject(err) : resolve(this); });
+});
+const dbGet = (sql, params = []) => new Promise((resolve, reject) => {
+  db.get(sql, params, (err, row) => { err ? reject(err) : resolve(row); });
+});
+const dbAll = (sql, params = []) => new Promise((resolve, reject) => {
+  db.all(sql, params, (err, rows) => { err ? reject(err) : resolve(rows); });
+});
+
+// Init schema
+db.serialize(() => {
+  db.run('PRAGMA foreign_keys = ON');
+  db.run(`
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      variant TEXT NOT NULL DEFAULT '',
+      unit TEXT NOT NULL DEFAULT 'pcs',
+      stock REAL NOT NULL DEFAULT 0,
+      cost_price REAL NOT NULL DEFAULT 0,
+      sale_price REAL NOT NULL DEFAULT 0,
+      min_warning REAL NOT NULL DEFAULT 0,
+      barcode TEXT DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sales (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      total_amount REAL NOT NULL DEFAULT 0,
+      cash_tendered REAL NOT NULL DEFAULT 0,
+      change_amount REAL NOT NULL DEFAULT 0,
+      item_count INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS sale_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sale_id INTEGER NOT NULL,
+      product_id INTEGER NOT NULL,
+      product_name TEXT NOT NULL,
+      product_variant TEXT NOT NULL DEFAULT '',
+      quantity REAL NOT NULL,
+      unit_price REAL NOT NULL,
+      subtotal REAL NOT NULL DEFAULT 0,
+      FOREIGN KEY(sale_id) REFERENCES sales(id) ON DELETE CASCADE,
+      FOREIGN KEY(product_id) REFERENCES products(id)
+    )
+  `);
+
+  // Seed if empty
+  db.get('SELECT COUNT(*) as cnt FROM products', (err, row) => {
+    if (err || (row && row.cnt > 0)) return;
+    const stmt = db.prepare(`
+      INSERT INTO products (name, variant, unit, stock, cost_price, sale_price, min_warning, barcode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    stmt.run('Liquid Soap', 'Bulk 20L Drum', 'liters', 50, 420, 650, 10, '1000001');
+    stmt.run('Liquid Soap', 'Bottle 500ml', 'pcs', 180, 28, 45, 20, '1000002');
+    stmt.run('Liquid Soap', 'Pouch 250ml', 'pcs', 300, 18, 28, 30, '1000003');
+    stmt.finalize(() => console.log('Seeded default products'));
+  });
+});
+
+// ── Products API ───────────────────────────────────────────────
+
+app.get('/api/products', async (req, res) => {
+  try {
+    const { q } = req.query;
+    let rows;
+    if (q && q.trim()) {
+      const s = `%${q.trim()}%`;
+      rows = await dbAll(
+        `SELECT * FROM products WHERE name LIKE ? OR variant LIKE ? OR barcode LIKE ? ORDER BY name, variant`,
+        [s, s, s]
+      );
+    } else {
+      rows = await dbAll('SELECT * FROM products ORDER BY name, variant');
+    }
+    res.json({ products: rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  console.log('Connected to SQLite database at', DBSOURCE);
 });
 
-// Simple health check
-app.get('/api/ping', (req, res) => {
-  res.json({ ok: true, time: new Date().toISOString() });
+app.get('/api/products/:id', async (req, res) => {
+  try {
+    const row = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    if (!row) return res.status(404).json({ error: 'Product not found' });
+    res.json({ product: row });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/', (req, res) => {
+app.post('/api/products', async (req, res) => {
+  try {
+    const { name, variant, unit, stock, cost_price, sale_price, min_warning, barcode } = req.body;
+    if (!name) return res.status(400).json({ error: 'name is required' });
+    const result = await dbRun(
+      `INSERT INTO products (name, variant, unit, stock, cost_price, sale_price, min_warning, barcode)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, variant || '', unit || 'pcs', Number(stock) || 0, Number(cost_price) || 0,
+       Number(sale_price) || 0, Number(min_warning) || 0, barcode || '']
+    );
+    const product = await dbGet('SELECT * FROM products WHERE id = ?', [result.lastID]);
+    res.json({ ok: true, product });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Product not found' });
+    const { name, variant, unit, stock, cost_price, sale_price, min_warning, barcode } = req.body;
+    await dbRun(
+      `UPDATE products SET name=?, variant=?, unit=?, stock=?, cost_price=?, sale_price=?, min_warning=?, barcode=? WHERE id=?`,
+      [
+        name ?? existing.name,
+        variant ?? existing.variant,
+        unit ?? existing.unit,
+        stock !== undefined ? Number(stock) : existing.stock,
+        cost_price !== undefined ? Number(cost_price) : existing.cost_price,
+        sale_price !== undefined ? Number(sale_price) : existing.sale_price,
+        min_warning !== undefined ? Number(min_warning) : existing.min_warning,
+        barcode ?? existing.barcode,
+        req.params.id,
+      ]
+    );
+    const updated = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    res.json({ ok: true, product: updated });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/products/:id', async (req, res) => {
+  try {
+    const existing = await dbGet('SELECT * FROM products WHERE id = ?', [req.params.id]);
+    if (!existing) return res.status(404).json({ error: 'Product not found' });
+    await dbRun('DELETE FROM products WHERE id = ?', [req.params.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Sales API ──────────────────────────────────────────────────
+
+app.post('/api/sales', async (req, res) => {
+  try {
+    const { items, cash_tendered } = req.body;
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'items array is required' });
+    }
+    const cash = Number(cash_tendered) || 0;
+    let totalAmount = 0;
+    let itemCount = 0;
+
+    // Validate all items
+    const resolved = [];
+    for (const item of items) {
+      const product = await dbGet('SELECT * FROM products WHERE id = ?', [item.product_id]);
+      if (!product) return res.status(400).json({ error: `Product ${item.product_id} not found` });
+      const qty = Number(item.quantity) || 1;
+      if (qty <= 0) return res.status(400).json({ error: 'Quantity must be positive' });
+      if (product.stock < qty) {
+        return res.status(400).json({
+          error: `Insufficient stock for ${product.name} ${product.variant} (have ${product.stock}, need ${qty})`
+        });
+      }
+      const unitPrice = product.sale_price;
+      const subtotal = unitPrice * qty;
+      totalAmount += subtotal;
+      itemCount += qty;
+      resolved.push({ product, qty, unitPrice, subtotal });
+    }
+
+    if (cash < totalAmount) {
+      return res.status(400).json({ error: 'Insufficient cash tendered' });
+    }
+    const changeAmount = cash - totalAmount;
+
+    // Insert sale
+    const saleResult = await dbRun(
+      `INSERT INTO sales (total_amount, cash_tendered, change_amount, item_count) VALUES (?, ?, ?, ?)`,
+      [totalAmount, cash, changeAmount, itemCount]
+    );
+    const saleId = saleResult.lastID;
+
+    // Insert items + deduct stock
+    for (const r of resolved) {
+      await dbRun(
+        `INSERT INTO sale_items (sale_id, product_id, product_name, product_variant, quantity, unit_price, subtotal)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [saleId, r.product.id, r.product.name, r.product.variant, r.qty, r.unitPrice, r.subtotal]
+      );
+      await dbRun('UPDATE products SET stock = stock - ? WHERE id = ?', [r.qty, r.product.id]);
+    }
+
+    const sale = await dbGet('SELECT * FROM sales WHERE id = ?', [saleId]);
+    const saleItems = await dbAll('SELECT * FROM sale_items WHERE sale_id = ?', [saleId]);
+    res.json({ ok: true, sale, items: saleItems });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sales', async (_req, res) => {
+  try {
+    const sales = await dbAll('SELECT * FROM sales ORDER BY created_at DESC LIMIT 500');
+    res.json({ sales });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/sales/:id', async (req, res) => {
+  try {
+    const sale = await dbGet('SELECT * FROM sales WHERE id = ?', [req.params.id]);
+    if (!sale) return res.status(404).json({ error: 'Sale not found' });
+    const items = await dbAll('SELECT * FROM sale_items WHERE sale_id = ?', [req.params.id]);
+    res.json({ sale, items });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Fallback ───────────────────────────────────────────────────
+app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// --- API: Products list with low-stock status
-app.get('/api/products', (req, res) => {
-  const sql = `SELECT * FROM products ORDER BY id`;
-  db.all(sql, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    const products = rows.map(p => {
-      let status = 'green';
-      if (p.stock <= 0) status = 'red';
-      else if (p.stock <= p.min_warning) status = 'yellow';
-      return { ...p, low_status: status };
-    });
-    res.json({ products });
-  });
-});
-
-// --- API: List transactions
-app.get('/api/transactions', (req, res) => {
-  const sql = `SELECT t.*, p.name, p.variant, p.unit FROM transactions t JOIN products p ON p.id = t.product_id ORDER BY t.created_at DESC LIMIT 1000`;
-  db.all(sql, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ transactions: rows });
-  });
-});
-
-// --- API: Adjust product stock (inflow/outflow)
-app.post('/api/products/:id/adjust', (req, res) => {
-  const productId = Number(req.params.id);
-  const { type, quantity, unit_price, note } = req.body;
-  if (!['inflow', 'outflow'].includes(type)) return res.status(400).json({ error: 'type must be inflow or outflow' });
-  const qty = Number(quantity);
-  if (isNaN(qty) || qty <= 0) return res.status(400).json({ error: 'quantity must be a positive number' });
-
-  db.get(`SELECT * FROM products WHERE id = ?`, [productId], (err, product) => {
-    if (err) return res.status(500).json({ error: err.message });
-    if (!product) return res.status(404).json({ error: 'product not found' });
-
-    const usedUnitPrice = (unit_price !== undefined && unit_price !== null) ? Number(unit_price) : (type === 'outflow' ? product.sale_price : product.cost_price);
-    const totalAmount = usedUnitPrice * qty;
-    const costTotal = (type === 'outflow') ? (product.cost_price * qty) : totalAmount;
-    const newStock = (type === 'inflow') ? (product.stock + qty) : (product.stock - qty);
-
-    // Update product stock and insert transaction atomically (serialize)
-    db.serialize(() => {
-      const updateStmt = `UPDATE products SET stock = ? WHERE id = ?`;
-      db.run(updateStmt, [newStock, productId], function (uerr) {
-        if (uerr) return res.status(500).json({ error: uerr.message });
-
-        const insertStmt = `INSERT INTO transactions (product_id, type, quantity, unit_price, total_amount, cost_total, note) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-        db.run(insertStmt, [productId, type, qty, usedUnitPrice, totalAmount, costTotal, note || null], function (ierr) {
-          if (ierr) return res.status(500).json({ error: ierr.message });
-          res.json({ ok: true, product_id: productId, new_stock: newStock, transaction_id: this.lastID });
-        });
-      });
-    });
-  });
-});
-
-// --- API: Financial analytics
-app.get('/api/analytics', (req, res) => {
-  // query param ?range=daily|week|month|year ; default daily
-  const range = req.query.range || 'daily';
-  let where = `date(t.created_at, 'localtime') = date('now','localtime')`;
-  if (range === 'week') {
-    where = `date(t.created_at, 'localtime') >= date('now','-6 days','localtime')`;
-  } else if (range === 'month') {
-    where = `strftime('%Y-%m', t.created_at) = strftime('%Y-%m','now','localtime')`;
-  } else if (range === 'year') {
-    where = `strftime('%Y', t.created_at) = strftime('%Y','now','localtime')`;
-  }
-
-  const sql = `SELECT t.type, SUM(t.total_amount) as total_amount_sum, SUM(t.cost_total) as cost_total_sum FROM transactions t WHERE ${where} GROUP BY t.type`;
-  db.all(sql, [], (err, rows) => {
-    if (err) return res.status(500).json({ error: err.message });
-    // compute revenue (outflow), cogs (from outflow), purchases (inflow)
-    let revenue = 0, cogs = 0, purchases = 0;
-    rows.forEach(r => {
-      if (r.type === 'outflow') {
-        revenue = Number(r.total_amount_sum) || 0;
-        cogs = Number(r.cost_total_sum) || 0;
-      } else if (r.type === 'inflow') {
-        purchases = Number(r.total_amount_sum) || 0;
-      }
-    });
-    const profit = revenue - cogs;
-    res.json({ range, revenue, cogs, purchases, profit });
-  });
-});
-
-// --- API: Export inventory and transactions as Excel (.xlsx)
-app.get('/api/export', async (req, res) => {
-  // supports ?format=csv or ?format=xlsx (default xlsx)
-  const format = (req.query.format || 'xlsx').toLowerCase();
-  try {
-    db.all(`SELECT * FROM products ORDER BY id`, [], (perr, products) => {
-      if (perr) return res.status(500).json({ error: perr.message });
-      db.all(`SELECT t.*, p.name as product_name FROM transactions t JOIN products p ON p.id = t.product_id ORDER BY t.created_at DESC`, [], async (terr, txs) => {
-        if (terr) return res.status(500).json({ error: terr.message });
-
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        if (format === 'csv') {
-          // Build combined CSV: Products then blank line then Transactions
-          const { Parser } = require('json2csv');
-          const prodFields = ['id', 'name', 'variant', 'unit', 'stock', 'cost_price', 'sale_price', 'min_warning', 'created_at'];
-          const txFields = ['id', 'product_id', 'product_name', 'type', 'quantity', 'unit_price', 'total_amount', 'cost_total', 'note', 'created_at'];
-          const prodParser = new Parser({ fields: prodFields });
-          const txParser = new Parser({ fields: txFields });
-          const prodCsv = prodParser.parse(products || []);
-          const txCsv = txParser.parse(txs || []);
-          const csvCombined = prodCsv + '\n\n' + txCsv;
-
-          const filename = `inventory_report_${timestamp}.csv`;
-          res.setHeader('Content-Type', 'text/csv');
-          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-          res.send(csvCombined);
-        } else {
-          const ExcelJS = require('exceljs');
-          const wb = new ExcelJS.Workbook();
-          wb.creator = 'Localhost Inventory System';
-          wb.created = new Date();
-          const prodSheet = wb.addWorksheet('Products');
-          prodSheet.addRow(['ID', 'Name', 'Variant', 'Unit', 'Stock', 'Cost Price', 'Sale Price', 'Min Warning', 'Created At']);
-          products.forEach(p => prodSheet.addRow([p.id, p.name, p.variant, p.unit, p.stock, p.cost_price, p.sale_price, p.min_warning, p.created_at]));
-          const txSheet = wb.addWorksheet('Transactions');
-          txSheet.addRow(['ID', 'Product ID', 'Product Name', 'Type', 'Quantity', 'Unit Price', 'Total Amount', 'Cost Total', 'Note', 'Created At']);
-          txs.forEach(t => txSheet.addRow([t.id, t.product_id, t.product_name, t.type, t.quantity, t.unit_price, t.total_amount, t.cost_total, t.note, t.created_at]));
-
-          const filename = `inventory_report_${timestamp}.xlsx`;
-          res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-          res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-          await wb.xlsx.write(res);
-          res.end();
-        }
-      });
-    });
-  } catch (ex) {
-    console.error('Export error', ex);
-    res.status(500).json({ error: String(ex) });
-  }
-});
 app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
+  console.log(`Soap POS running on http://localhost:${PORT}`);
 });
 
 module.exports = { app, db };
+
+/* @julesssssssswrld */
