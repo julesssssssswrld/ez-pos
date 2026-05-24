@@ -29,5 +29,5 @@ plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
-rootProject.name = "Butigers and Bloom POS"
+rootProject.name = "EZ-POS"
 include(":app")

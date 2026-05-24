@@ -5,21 +5,39 @@ plugins {
   alias(libs.plugins.ksp)
 }
 
+import java.util.Properties
+import java.io.FileInputStream
+
 android {
-    namespace = "com.example.butigersandbloompos"
+    namespace = "com.iandevs.ezpos"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.example.butigersandbloompos"
+        applicationId = "com.iandevs.ezpos"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        create("release") {
+            val keystorePropertiesFile = rootProject.file("keystore.properties")
+            if (keystorePropertiesFile.exists()) {
+                val keystoreProperties = Properties()
+                keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
