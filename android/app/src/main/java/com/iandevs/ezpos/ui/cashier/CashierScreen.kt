@@ -519,25 +519,88 @@ private fun CartItemRow(
 
 // ── Always-on inline barcode scanner strip ─────────────────────────────────────
 
+/** Generates and plays a short sine wave beep tone on the main thread via AudioTrack */
+private fun playBeep() {
+    android.os.Handler(android.os.Looper.getMainLooper()).post {
+        try {
+            val sampleRate = 44100
+            val durationMs = 150
+            val freqHz = 1800.0
+            val numSamples = sampleRate * durationMs / 1000
+            val samples = ShortArray(numSamples)
+            for (i in 0 until numSamples) {
+                val angle = 2.0 * Math.PI * i / (sampleRate / freqHz)
+                samples[i] = (Math.sin(angle) * Short.MAX_VALUE * 0.7).toInt().toShort()
+            }
+            val bufferSize = samples.size * 2
+            val audioTrack = android.media.AudioTrack.Builder()
+                .setAudioAttributes(
+                    android.media.AudioAttributes.Builder()
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    android.media.AudioFormat.Builder()
+                        .setSampleRate(sampleRate)
+                        .setEncoding(android.media.AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(android.media.AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .setTransferMode(android.media.AudioTrack.MODE_STATIC)
+                .build()
+            audioTrack.write(samples, 0, samples.size)
+            audioTrack.setNotificationMarkerPosition(samples.size)
+            audioTrack.setPlaybackPositionUpdateListener(object : android.media.AudioTrack.OnPlaybackPositionUpdateListener {
+                override fun onMarkerReached(track: android.media.AudioTrack?) { track?.release() }
+                override fun onPeriodicNotification(track: android.media.AudioTrack?) {}
+            })
+            audioTrack.play()
+        } catch (_: Exception) { /* silently fail — audio is non-critical */ }
+    }
+}
+
 @Composable
 @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
 fun InlineScannerStrip(
     onBarcodeScanned: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    // Cooldown to avoid firing the same barcode 60× per second
-    var lastScanned by remember { mutableStateOf("") }
-    var lastScanTime by remember { mutableStateOf(0L) }
 
-    Card(modifier = modifier, shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(2.dp)) {
+    // Use rememberUpdatedState so the analyzer lambda always calls the latest callback
+    val currentOnBarcodeScanned by rememberUpdatedState(onBarcodeScanned)
+
+    // ── Two-layer barcode protection ──────────────────────────
+    // Layer 1: Multi-frame confirmation — same barcode must be seen for N consecutive frames
+    val pendingBarcodeRef = remember { mutableStateOf<String?>(null) }
+    val confirmCountRef = remember { mutableIntStateOf(0) }
+    val confirmThreshold = 15 // ~0.5 second at 30fps
+
+    // Layer 2: Hard lockout — after a successful fire, ignore ALL detections for 3 seconds
+    val lockoutUntilRef = remember { mutableStateOf(0L) }
+    val lockoutDurationMs = 3000L
+
+    Card(modifier = modifier.clip(RoundedCornerShape(14.dp)), shape = RoundedCornerShape(14.dp), elevation = CardDefaults.cardElevation(2.dp)) {
         AndroidView(
             factory = { ctx ->
+                // Wrap PreviewView in a clipping FrameLayout to prevent camera overflow
+                val cornerRadiusPx = (14 * ctx.resources.displayMetrics.density).toInt()
+                val wrapper = android.widget.FrameLayout(ctx).apply {
+                    clipChildren = true
+                    outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: android.view.View, outline: android.graphics.Outline) {
+                            outline.setRoundRect(0, 0, view.width, view.height, cornerRadiusPx.toFloat())
+                        }
+                    }
+                    clipToOutline = true
+                }
                 val previewView = PreviewView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     scaleType = PreviewView.ScaleType.FILL_CENTER
                 }
+                wrapper.addView(previewView)
                 val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
                 cameraProviderFuture.addListener({
                     val cameraProvider = cameraProviderFuture.get()
@@ -551,13 +614,38 @@ fun InlineScannerStrip(
                             val inputImage = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
                             scanner.process(inputImage)
                                 .addOnSuccessListener { barcodes ->
-                                    for (barcode in barcodes) {
-                                        barcode.rawValue?.let { value ->
-                                            val now = System.currentTimeMillis()
-                                            if (value.isNotBlank() && (value != lastScanned || now - lastScanTime > 2000)) {
-                                                lastScanned = value
-                                                lastScanTime = now
-                                                onBarcodeScanned(value)
+                                    val now = System.currentTimeMillis()
+
+                                    // Layer 2: Hard lockout check
+                                    if (now < lockoutUntilRef.value) {
+                                        // Still in lockout — ignore everything
+                                        return@addOnSuccessListener
+                                    }
+
+                                    if (barcodes.isEmpty()) {
+                                        // No barcode in view — reset confirmation streak
+                                        pendingBarcodeRef.value = null
+                                        confirmCountRef.intValue = 0
+                                    } else {
+                                        val firstValid = barcodes.firstNotNullOfOrNull { it.rawValue?.takeIf { v -> v.isNotBlank() } }
+                                        if (firstValid != null) {
+                                            if (firstValid == pendingBarcodeRef.value) {
+                                                // Same barcode as pending — increment confirmation
+                                                confirmCountRef.intValue++
+                                            } else {
+                                                // Different barcode — restart confirmation
+                                                pendingBarcodeRef.value = firstValid
+                                                confirmCountRef.intValue = 1
+                                            }
+
+                                            // Layer 1: Check if confirmation threshold reached
+                                            if (confirmCountRef.intValue >= confirmThreshold) {
+                                                // FIRE! Reset state and start lockout
+                                                lockoutUntilRef.value = now + lockoutDurationMs
+                                                pendingBarcodeRef.value = null
+                                                confirmCountRef.intValue = 0
+                                                playBeep()
+                                                currentOnBarcodeScanned(firstValid)
                                             }
                                         }
                                     }
@@ -570,7 +658,7 @@ fun InlineScannerStrip(
                         cameraProvider.bindToLifecycle(lifecycleOwner, CameraSelector.DEFAULT_BACK_CAMERA, preview, imageAnalysis)
                     } catch (e: Exception) { Log.e("InlineScanner", "Camera bind failed", e) }
                 }, ContextCompat.getMainExecutor(ctx))
-                previewView
+                wrapper
             },
             modifier = Modifier.fillMaxSize()
         )
