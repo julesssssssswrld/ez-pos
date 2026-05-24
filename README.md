@@ -14,7 +14,7 @@ EZ-POS is a offline Point of Sale (POS) Android application designed for small t
 ### Admin Panel & Management
 * **Inventory Management**: Complete CRUD operations for products, with low-stock and out-of-stock tracking indicators.
 * **Audit Logs (Inventory Logs)**: Transparent transaction history tracking every stock addition, deduction, or sale transaction with notes and timestamps.
-* **Sales History**: Complete list of all historical sales, complete with detailed breakdowns of items sold and payment methods used.
+* **Sales History**: Complete list of all historical sales, complete with detailed breakdowns of items sold.
 * **Visual Analytics**: Metrics and interactive analytics dashboards showing sales trends over time, top-selling products, and revenue breakdowns.
 
 ### Modern UI/UX
